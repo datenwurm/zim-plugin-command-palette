@@ -121,6 +121,7 @@ class ZimDashDialog(Dialog):
         completion = Gtk.EntryCompletion()
         completion.set_model(store)
         completion.set_text_column(0)
+        completion.connect("match-selected", self.on_match_selected)
 
         def match_anywhere(_completion, _entrystr, _iter, _data):
             """ Match any part. """
@@ -147,6 +148,12 @@ class ZimDashDialog(Dialog):
         self.set_modal(True)
         self.set_default_size(380, 100)
         self.vbox.pack_start(self.entry, True, True, 0)
+
+    def on_match_selected(self, completion, model, iter):
+        """ Directly close dialog when selecting an entry in the completion list. """
+        self.entry.set_text(model[iter][0])
+        if self.do_response_ok():
+            self.close()
 
     def do_validate(self, entry, data):
         """ Validating selected text entry and enable/disable ok button. """
