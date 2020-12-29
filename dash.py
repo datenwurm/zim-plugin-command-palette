@@ -7,7 +7,11 @@
 #
 # ChangeLog
 # 2020-11-22 1st working version
-#
+# 2020-11-23 Improved usability
+#            - Selecting item in autocomplete list will directly execute
+# 2020-12-13 Improved code and usability
+#            - Removed '{'-keybinding used to open dash.
+#            - Improved
 # TODO:
 # [ ] ...
 
@@ -29,9 +33,6 @@ from zim.gui.widgets import Dialog
 logger = logging.getLogger('zim.plugins.dashboard')
 
 
-DEFAULT_DASH_KEY = "{"
-
-
 class DashPlugin(PluginClass):
     plugin_info = {
         'name': _('Dash'),  # T: plugin name
@@ -41,10 +42,7 @@ class DashPlugin(PluginClass):
         'help': 'Plugins:Dash',
     }
 
-    plugin_preferences = (
-        # key, type, label, default
-        ('dash_key', 'string', _('Dash key'), DEFAULT_DASH_KEY),
-    )
+    plugin_preferences = ()
 
 
 class DashMainWindowExtension(MainWindowExtension):
@@ -52,9 +50,7 @@ class DashMainWindowExtension(MainWindowExtension):
 
     def __init__(self, plugin, window):
         MainWindowExtension.__init__(self, plugin, window)
-        self.plugin = plugin
         self.window = window
-        self.connectto(window.pageview.textview, 'key-press-event')
 
     def _init_store(self):
         """ Construct the store containing all menu-items and associated actions. """
@@ -62,11 +58,6 @@ class DashMainWindowExtension(MainWindowExtension):
         for label, action in ZimMenuBarCrawler().run(self.window.menubar).items():
             store.append((label, action))
         return store
-
-    def on_key_press_event(self, widget, event):
-        """ Catch the dash key and show zim dash dialog. """
-        if event.keyval == ord(self.dash_key):
-            return self.do_show_dash_dialog()
 
     @action('', accelerator='<alt>x', menuhints='accelonly')
     def do_show_dash_dialog(self):
@@ -76,11 +67,6 @@ class DashMainWindowExtension(MainWindowExtension):
             # The return value is only relevant for the on_key_press_event function and makes sure that the
             # pressed key is not processed any further.
             return True
-
-    def _get_dash_key(self):
-        return self.plugin.preferences['dash_key']
-
-    dash_key = property(fget=_get_dash_key)
 
 
 class ZimMenuBarCrawler:
@@ -93,14 +79,14 @@ class ZimMenuBarCrawler:
         def crawl(container: Gtk.MenuItem, path: str):
             if container.get_submenu():
                 for child in container.get_submenu():
-                    if isinstance(child, Gtk.ImageMenuItem):
+                    if hasattr(child, "get_label") and child.get_label():
                         child_path = path + " > " + child.get_label().replace("_", "")
                         crawl(child, child_path)
             else:
                 result[path] = container.activate
 
         for child in menu_bar:
-            if isinstance(child, Gtk.ImageMenuItem):
+            if hasattr(child, "get_label") and child.get_label():
                 crawl(child, child.get_label().replace("_", ""))
 
         return result
