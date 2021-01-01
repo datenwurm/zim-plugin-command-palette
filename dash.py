@@ -14,7 +14,8 @@
 # 2020-12-13 Improved code and usability
 #            - Removed '{'-keybinding used to open dash.
 # 2020-12-29 Added history support
-#
+# 2021-01-01 Improved usability
+#            - Popups can now be reopened using arrow keys.
 
 import json
 import logging
@@ -192,6 +193,7 @@ class ZimDashDialog(Dialog):
         completion = Gtk.EntryCompletion()
         completion.set_model(store)
         completion.set_text_column(0)
+        completion.set_minimum_key_length(0)
         completion.connect("match-selected", self.on_match_selected)
 
         def match_anywhere(_completion, _entrystr, _iter, _data):
@@ -245,6 +247,9 @@ class ZimDashDialog(Dialog):
             logger.debug("ZimDashPlugin: Selected previous entry from history: {}".format(history_entry))
             if history_entry:
                 self.entry.set_text(history_entry)
+            return True
+        elif event.keyval == Gdk.KEY_Up or event.keyval == Gdk.KEY_Down:
+            self.entry.emit('changed')
             return True
 
     def on_match_selected(self, completion, model, iter):
