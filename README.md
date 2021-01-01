@@ -4,11 +4,11 @@ This plugin opens a search dialog to allow quickly executing menu entries.
 
 ![Zim Dash Plugin](zim-plugin-dash.gif)
 
-
 # Usage
 
-The dialog can be opened by typing ```{``` within the wiki editor or by
-pressing ```alt+x``` on your keyboard. 
+The dialog can be opened by pressing ```alt+x``` on your keyboard.
+Previously selected entries can be cycled through using
+```ctrl+TAB``` or ```ctrl+shift+TAB```.
 
 # Setup
 
