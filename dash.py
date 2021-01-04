@@ -98,6 +98,7 @@ class ZimDashHistory:
     def __init__(self, history_file, history_size, history_whitelist):
         self.history_file = history_file
         self.history_whitelist = history_whitelist
+        self.history_size = history_size
         self.history = deque(self._load(), maxlen=history_size)
 
     def _load(self):
@@ -148,9 +149,12 @@ class ZimDashHistory:
     def update(self, new_entry):
         if new_entry in self.history_whitelist:
             # When new entry already in history, delete it and re-add it as first entry
-            self.history = deque(filter(lambda entry: entry != new_entry, self.history))
+            logger.debug("ZimDashPlugin: Adding new entry to history: {}".format(new_entry))
+            self.history = deque(filter(lambda entry: entry != new_entry, self.history), maxlen=self.history_size)
             self.history.appendleft(new_entry)
             self._save()
+        else:
+            logger.debug("ZimDashPlugin: Updating history failed! Entry not in white list: {}".format(new_entry))
 
 
 class ZimMenuBarCrawler:
