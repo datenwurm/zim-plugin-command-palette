@@ -30,13 +30,15 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
 from zim.actions import action
-from zim.config import XDG_DATA_HOME, String
+from zim.config import String
 from zim.gui.mainwindow import MainWindowExtension
 from zim.gui.widgets import Dialog
 from zim.plugins import PluginClass
 
 
 logger = logging.getLogger('zim.plugins.dashboard')
+
+SHOW_KEYBOARD_SHORTCUTS_DEFAULT = True
 
 
 class DashPlugin(PluginClass):
@@ -47,6 +49,9 @@ class DashPlugin(PluginClass):
         'author': 'Thomas Engel <thomas.engel.web@gmail.com>',
         'help': 'Plugins:Dash',
     }
+    plugin_preferences = (
+        ('show_keyboard_shortcuts', 'bool', _('Show keyboard shortcuts'), SHOW_KEYBOARD_SHORTCUTS_DEFAULT),
+    )
 
 
 class DashMainWindowExtension(MainWindowExtension):
@@ -58,15 +63,17 @@ class DashMainWindowExtension(MainWindowExtension):
 
     def _init_store(self):
         """ Construct the store containing all menu-items and associated actions. """
-        store = Gtk.ListStore(str, object)
-        for label, action in ZimMenuBarCrawler().run(self.window.menubar).items():
-            store.append((label, action))
+        store = Gtk.ListStore(str, object, str)
+        for label, item in ZimMenuBarCrawler().run(self.window.menubar).items():
+            action = item[0]
+            shortcut = item[1]
+            store.append((label, action, shortcut))
         return store
 
     @action('', accelerator='<alt>x', menuhints='accelonly')
     def do_show_dash_dialog(self):
         store = self._init_store()
-        dialog = ZimDashDialog(self.window, store)
+        dialog = ZimDashDialog(self.window, store, self.plugin.preferences)
         if dialog.run() == Gtk.ResponseType.OK:
             dialog.action()
             # The return value is only relevant for the on_key_press_event function and makes sure that the
@@ -85,10 +92,15 @@ class ZimMenuBarCrawler:
             if container.get_submenu():
                 for child in container.get_submenu():
                     if hasattr(child, "get_label") and child.get_label():
-                        child_path = path + " > " + child.get_label().replace("_", "")
+                        child_path = path + u'\u0020\u0020\u00BB\u0020\u0020' + child.get_label().replace("_", "")
                         crawl(child, child_path)
             else:
-                result[path] = container.activate
+                accel_name = None
+                if container.get_accel_path():
+                    accel = Gtk.AccelMap.lookup_entry(container.get_accel_path())[1]
+                    accel_name = Gtk.accelerator_name(accel.accel_key, accel.accel_mods)
+                result[path] = [container.activate, accel_name]
+
 
         for child in menu_bar:
             if hasattr(child, "get_label") and child.get_label():
@@ -100,7 +112,7 @@ class ZimMenuBarCrawler:
 class ZimDashDialog(Dialog):
     """ A search dialog with auto-complete feature. """
 
-    def __init__(self, parent, store):
+    def __init__(self, parent, store, preferences):
         title = _('Dash')
         Dialog.__init__(self, parent, title)
 
@@ -112,6 +124,12 @@ class ZimDashDialog(Dialog):
         # Configure completion for search field.
         completion = Gtk.EntryCompletion()
         completion.set_model(store)
+
+        if preferences["show_keyboard_shortcuts"]:
+            cell_shortcut = Gtk.CellRendererText()
+            completion.pack_end(cell_shortcut, False)
+            completion.add_attribute(cell_shortcut, 'text', 2)
+
         completion.set_text_column(0)
         completion.set_minimum_key_length(0)
         completion.connect("match-selected", self.on_match_selected)
@@ -126,7 +144,7 @@ class ZimDashDialog(Dialog):
         self.hbox = Gtk.HBox()
 
         # Add search field.
-        self.txt_search = Gtk.Entry()
+        self.txt_search = Gtk.SearchEntry(hexpand=True, margin=2)
         self.txt_search.set_activates_default(True)  # Make ENTER key press trigger the OK button.
         self.txt_search.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, Gtk.STOCK_FIND)
         self.txt_search.set_placeholder_text("Search actions")
@@ -136,7 +154,7 @@ class ZimDashDialog(Dialog):
         if last_entry:
             self.txt_search.set_text(last_entry)
 
-        self.txt_search.connect("changed", self.do_validate, parent)
+        self.txt_search.connect('search-changed', self.do_validate, parent)
         self.txt_search.connect("key-press-event", self.on_key_pressed, parent)
 
         # Add ok button.
@@ -168,6 +186,10 @@ class ZimDashDialog(Dialog):
         if event.keyval == Gdk.KEY_Up or event.keyval == Gdk.KEY_Down:
             self.txt_search.emit('changed')
             return True
+        elif event.keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
 
     def on_match_selected(self, completion, model, iter):
         """ Directly close dialog when selecting an entry in the completion list. """
