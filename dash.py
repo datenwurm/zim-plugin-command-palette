@@ -18,20 +18,19 @@
 #            - Popups can now be reopened using arrow keys.
 # 2021-01-03 Improved usability
 #            - History can now be controlled using buttons
+# 2021-01-23 Limited history feature to only contain last entry
+#
 
-import json
 import logging
-from collections import deque
 
 import gi
-import os
 
 gi.require_version('Gdk', '3.0')
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
 from zim.actions import action
-from zim.config import XDG_DATA_HOME
+from zim.config import XDG_DATA_HOME, String
 from zim.gui.mainwindow import MainWindowExtension
 from zim.gui.widgets import Dialog
 from zim.plugins import PluginClass
@@ -39,18 +38,6 @@ from zim.plugins import PluginClass
 
 logger = logging.getLogger('zim.plugins.dashboard')
 
-WORKING_DIR = str(XDG_DATA_HOME.subdir(('zim', 'plugins')))
-HISTORY_FILE = os.path.join(WORKING_DIR, 'dash.json')
-HISTORY_SIZE_DEFAULT = 5
-HISTORY_SIZE_MIN = 1
-HISTORY_SIZE_MAX = 99
-css = b"""
-.small-button {
-  min-height: 0px;
-  padding-bottom: 0px;
-  padding-top: 0px;
-}
-"""
 
 class DashPlugin(PluginClass):
     plugin_info = {
@@ -60,10 +47,6 @@ class DashPlugin(PluginClass):
         'author': 'Thomas Engel <thomas.engel.web@gmail.com>',
         'help': 'Plugins:Dash',
     }
-
-    plugin_preferences = (
-        ('history_size', 'int', _('History size'), HISTORY_SIZE_DEFAULT, (HISTORY_SIZE_MIN, HISTORY_SIZE_MAX)),
-    )
 
 
 class DashMainWindowExtension(MainWindowExtension):
@@ -83,78 +66,12 @@ class DashMainWindowExtension(MainWindowExtension):
     @action('', accelerator='<alt>x', menuhints='accelonly')
     def do_show_dash_dialog(self):
         store = self._init_store()
-        history_whitelist = [item[0] for item in store]
-        history = ZimDashHistory(HISTORY_FILE, self.plugin.preferences["history_size"], history_whitelist)
-        dialog = ZimDashDialog(self.window, store, history)
+        dialog = ZimDashDialog(self.window, store)
         if dialog.run() == Gtk.ResponseType.OK:
             dialog.action()
             # The return value is only relevant for the on_key_press_event function and makes sure that the
             # pressed key is not processed any further.
             return True
-
-
-class ZimDashHistory:
-
-    def __init__(self, history_file, history_size, history_whitelist):
-        self.history_file = history_file
-        self.history_whitelist = history_whitelist
-        self.history_size = history_size
-        self.history = deque(self._load(), maxlen=history_size)
-
-    def _load(self):
-        if not os.path.isfile(self.history_file):
-            # Either not initialized yet, path does not exist or no permission to write history file.
-            logger.warning("ZimDashPlugin: History file does not exist!")
-            return []
-        try:
-            with open(self.history_file) as input_file:
-                data = json.load(input_file)
-            # Remove any entries which are not whitelisted
-            history_entries =  [entry for entry in data["history"] if entry in self.history_whitelist]
-            logger.info("ZimDashPlugin: Successfully loaded history file!")
-            return history_entries
-        except (Exception, json.decoder.JSONDecodeError) as err:
-            # Either invalid format, path does not exist or no permission to read history file.
-            logger.error("ZimDashPlugin: Error reading history file!")
-            logger.exception(err)
-            return []
-
-    def _save(self):
-        try:
-            with open(self.history_file, "w") as output_file:
-                json.dump({"history": list(self.history)}, output_file)
-            logger.info("ZimDashPlugin: Successfully updated history file!")
-        except Exception as err:
-            # Either path does not exist or no permission to write history file.
-            logger.error("ZimDashPlugin: Error writing history file!")
-            logger.exception(err)
-
-    def current(self):
-        if not self.history:
-            return None
-        return self.history[0]
-
-    def next(self):
-        if not self.history:
-            return None
-        self.history.rotate(-1)
-        return self.history[0]
-
-    def previous(self):
-        if not self.history:
-            return None
-        self.history.rotate(+1)
-        return self.history[0]
-
-    def update(self, new_entry):
-        if new_entry in self.history_whitelist:
-            # When new entry already in history, delete it and re-add it as first entry
-            logger.debug("ZimDashPlugin: Adding new entry to history: {}".format(new_entry))
-            self.history = deque(filter(lambda entry: entry != new_entry, self.history), maxlen=self.history_size)
-            self.history.appendleft(new_entry)
-            self._save()
-        else:
-            logger.debug("ZimDashPlugin: Updating history failed! Entry not in white list: {}".format(new_entry))
 
 
 class ZimMenuBarCrawler:
@@ -183,17 +100,14 @@ class ZimMenuBarCrawler:
 class ZimDashDialog(Dialog):
     """ A search dialog with auto-complete feature. """
 
-    def __init__(self, parent, store, history):
+    def __init__(self, parent, store):
         title = _('Dash')
         Dialog.__init__(self, parent, title)
 
+        self.uistate.define(last_entry=String(None))
         self.action = None
         self.store = store
         self.entries = {item[0]: item[1] for item in self.store}  # { label: action }
-
-        self.history = history
-        # Indicates whether the user has already selected an entry from history yet.
-        self.history_activated = False
 
         # Configure completion for search field.
         completion = Gtk.EntryCompletion()
@@ -211,22 +125,17 @@ class ZimDashDialog(Dialog):
 
         self.hbox = Gtk.HBox()
 
-        # Add history buttons.
-        prev_icon = Gtk.Image.new_from_icon_name("go-previous", Gtk.IconSize.SMALL_TOOLBAR)
-        self.btn_history_prev = Gtk.ToolButton.new(prev_icon, "Previous")
-        self.btn_history_prev.set_tooltip_text("Select previous entry from history (Ctrl+Shift+Tab)")
-        self.btn_history_prev.connect("clicked", lambda widget: self.do_show_previous_history_entry())
-        next_icon = Gtk.Image.new_from_icon_name("go-next", Gtk.IconSize.SMALL_TOOLBAR)
-        self.btn_history_next = Gtk.ToolButton.new(next_icon, "Next")
-        self.btn_history_next.set_tooltip_text("Select next entry from history (Ctrl+Tab)")
-        self.btn_history_next.connect("clicked", lambda widget: self.do_show_next_history_entry())
-
         # Add search field.
         self.txt_search = Gtk.Entry()
         self.txt_search.set_activates_default(True)  # Make ENTER key press trigger the OK button.
         self.txt_search.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, Gtk.STOCK_FIND)
         self.txt_search.set_placeholder_text("Search actions")
         self.txt_search.set_completion(completion)
+
+        last_entry = self.init_last_entry()
+        if last_entry:
+            self.txt_search.set_text(last_entry)
+
         self.txt_search.connect("changed", self.do_validate, parent)
         self.txt_search.connect("key-press-event", self.on_key_pressed, parent)
 
@@ -234,31 +143,29 @@ class ZimDashDialog(Dialog):
         self.btn_ok = self.get_widget_for_response(response_id=Gtk.ResponseType.OK)
         self.btn_ok.set_can_default(True)
         self.btn_ok.grab_default()
-        self.btn_ok.set_sensitive(False)
+        self.btn_ok.set_sensitive(last_entry is not None)
 
         # Configure dialog.
         self.set_modal(True)
         self.set_default_size(380, 100)
-        self.hbox.pack_start(self.btn_history_prev, False, False, 0)
-        self.hbox.pack_start(self.btn_history_next, False, False, 0)
         self.hbox.pack_start(self.txt_search, True, True, 0)
         self.vbox.pack_start(self.hbox, True, True, 0)
 
         # Set focus to search field
         self.txt_search.grab_focus()
 
+    def init_last_entry(self):
+        """
+        Returns either the entry which was selected by the user in the last dialog call or None, when there never was
+        any selection at all or when the selected entry does not exist anymore (e.g. disabled plugin).
+        """
+        if self.uistate['last_entry'] in self.entries:
+            return self.uistate['last_entry']
+        return None
+
     def on_key_pressed(self, widget, event, data=None):
         """ Listener for gtk.Entry key press events. """
-        ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
-        shift = event.state & Gdk.ModifierType.SHIFT_MASK
-        tab = Gdk.KEY_Tab == event.keyval or Gdk.KEY_ISO_Left_Tab == event.keyval
-        if tab and ctrl and not shift:
-            self.do_show_next_history_entry()
-            return True
-        elif tab and ctrl and shift:
-            self.do_show_previous_history_entry()
-            return True
-        elif event.keyval == Gdk.KEY_Up or event.keyval == Gdk.KEY_Down:
+        if event.keyval == Gdk.KEY_Up or event.keyval == Gdk.KEY_Down:
             self.txt_search.emit('changed')
             return True
 
@@ -269,27 +176,6 @@ class ZimDashDialog(Dialog):
         if self.do_response_ok():
             self.close()
 
-    def do_show_previous_history_entry(self):
-        """ Shows previous history entry in search field, if available """
-        history_entry = self.history.previous()
-        self.history_activated = True
-        logger.debug("ZimDashPlugin: Selected previous entry from history: {}".format(history_entry))
-        if history_entry:
-            self.txt_search.set_text(history_entry)
-
-    def do_show_next_history_entry(self):
-        """ Shows next history entry in search field, if available """
-        if not self.history_activated:
-            # Makes sure that the first entry of the history is returned the first time
-            history_entry = self.history.current()
-            self.history_activated = True
-        else:
-            # Next history entry, if available
-            history_entry = self.history.next()
-        logger.debug("ZimDashPlugin: Selected next entry from history: {}".format(history_entry))
-        if history_entry:
-            self.txt_search.set_text(history_entry)
-
     def do_validate(self, entry, data):
         """ Validating selected text entry and enable/disable ok button. """
         self.btn_ok.set_sensitive(entry.get_text() in self.entries)
@@ -298,7 +184,7 @@ class ZimDashDialog(Dialog):
         """ Finishing up when activating the ok button. """
         if self.txt_search.get_text() in self.entries:
             self.action = self.entries[self.txt_search.get_text()]
-            self.history.update(self.txt_search.get_text())
+            self.uistate['last_entry'] = self.txt_search.get_text()
             self.result = Gtk.ResponseType.OK
             return True
         else:
