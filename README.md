@@ -2,7 +2,7 @@
 
 This plugin opens a search dialog to allow quickly executing menu entries.
 
-![Zim Command Palette Plugin](zim-plugin-command-palette.gif)
+![Zim Command Palette Plugin](zim-plugin-command-palette.png)
 
 # Usage
 
