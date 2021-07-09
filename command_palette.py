@@ -67,11 +67,37 @@ class CommandPaletteMainWindowExtension(MainWindowExtension):
 	def do_show_command_palette_dialog(self):
 		store = self._init_store()
 		dialog = ZimCommandPaletteDialog(self.window, store, self.plugin.preferences)
-		if dialog.run() == Gtk.ResponseType.OK:
+		# BUG: Text selection in page view may get lost when opening the command palette dialog.
+		# FIX: Cache text selection and restore after dialog is closed.
+		text_buffer_selection_cache = TextBufferSelectionCache(self.window.pageview.textview.get_buffer())
+		dialog_response = dialog.run()
+		text_buffer_selection_cache.restore()
+		if dialog_response == Gtk.ResponseType.OK:
 			dialog.action()
 			# The return value is only relevant for the on_key_press_event function and makes sure that the
 			# pressed key is not processed any further.
 			return True
+
+
+class TextBufferSelectionCache:
+	""" Cache and restore a selection within a text buffer. """
+
+	def __init__(self, buffer):
+		self._buffer = buffer
+		self.save()
+
+	def has_selection(self):
+		return self._sel_start is not None and self._sel_end is not None
+
+	def save(self):
+		if self._buffer.get_has_selection():
+			self._sel_start, self._sel_end = self._buffer.get_selection_bounds()
+		else:
+			self._sel_start, self._sel_end = None, None
+
+	def restore(self):
+		if self.has_selection():
+			self._buffer.select_range(self._sel_start, self._sel_end)
 
 
 class ZimMenuBarCrawler:
